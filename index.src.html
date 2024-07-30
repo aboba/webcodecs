@@ -30,6 +30,7 @@ Markup Shorthands:css no, markdown yes, dfn yes
 
 <pre class=link-defaults>
 spec:html; type:attribute; text:hidden
+spec:html; type:enum-value; text:srgb
 spec:infra; type:dfn; text:list
 spec:infra; type:dfn; text:enqueue
 </pre>
@@ -38,6 +39,8 @@ spec:infra; type:dfn; text:enqueue
 spec: html; urlPrefix: https://html.spec.whatwg.org/multipage/;
     for: ImageBitmap;
         type: dfn; text: bitmap data; url: imagebitmap-and-animations.html#concept-imagebitmap-bitmap-data
+    for: ImageData
+        type: dfn; text: canvas pixel data; url: canvas.html#imagedata
     for: Canvas;
         type: dfn; text: Check the usability of the image argument; url: canvas.html#check-the-usability-of-the-image-argument
         type: dfn; text: is not origin-clean; url: canvas.html#the-image-argument-is-not-origin-clean
@@ -1306,8 +1309,8 @@ Algorithms {#audioencoder-algorithms}
 EncodedAudioChunkMetadata {#encoded-audio-chunk-metadata}
 ---------------------------------------------------------
 The following metadata dictionary is emitted by the
-{{EncodedVideoChunkOutputCallback}} alongside an associated
-{{EncodedVideoChunk}}.
+{{EncodedAudioChunkOutputCallback}} alongside an associated
+{{EncodedAudioChunk}}.
 
 <xmp class='idl'>
 dictionary EncodedAudioChunkMetadata {
@@ -1941,7 +1944,9 @@ To check if an {{AudioDecoderConfig}} is a <dfn export>valid AudioDecoderConfig<
 1. If {{AudioDecoderConfig/codec}} is empty after
     [=strip leading and trailing ASCII whitespace|stripping leading and trailing ASCII whitespace=],
     return `false`.
-2. Return `true`.
+2. If {{AudioDecoderConfig/description}} is [[=BufferSource/detached=]], return
+     false.
+3. Return `true`.
 
 <dl>
   <dt><dfn dict-member for=AudioDecoderConfig>codec</dfn></dt>
@@ -1995,7 +2000,9 @@ run these steps:
     return `false`.
 5. If {{VideoDecoderConfig/displayAspectWidth}} = 0 or
     {{VideoDecoderConfig/displayAspectHeight}} = 0, return `false`.
-6. Return `true`.
+6. If {{VideoDecoderConfig/description}} is [[=BufferSource/detached=]],
+    return false.
+7. Return `true`.
 
 <dl>
   <dt><dfn dict-member for=VideoDecoderConfig>codec</dfn></dt>
@@ -2072,8 +2079,8 @@ AudioEncoderConfig{#audio-encoder-config}
 <xmp class='idl'>
 dictionary AudioEncoderConfig {
   required DOMString codec;
-  [EnforceRange] unsigned long sampleRate;
-  [EnforceRange] unsigned long numberOfChannels;
+  [EnforceRange] required unsigned long sampleRate;
+  [EnforceRange] required unsigned long numberOfChannels;
   [EnforceRange] unsigned long long bitrate;
   BitrateMode bitrateMode = "variable";
 };
@@ -2090,7 +2097,9 @@ run these steps:
 2. If the {{AudioEncoderConfig}} has a codec-specific extension and the corresponding
     registration in the [[WEBCODECS-CODEC-REGISTRY]] defines steps to check whether
     the extension is a valid extension, return the result of running those steps.
-3. Return `true`.
+3. If {{AudioEncoderConfig/sampleRate}} or {{AudioEncoderConfig/numberOfChannels}} are
+     equal to zero, return `false`.
+4. Return `true`.
 
 <dl>
   <dt><dfn dict-member for=AudioEncoderConfig>codec</dfn></dt>
@@ -2258,13 +2267,22 @@ To check if a {{VideoEncoderConfig}} is a <dfn>valid VideoEncoderConfig</dfn>,
 
     The User Agent <em class="rfc2119">MAY</em> use this hint to set
     expectations about incoming {{VideoFrame}}s and to improve encoding quality.
+    If using this hint:
+      - The User Agent <em class="rfc2119">MUST</em> respect other explicitly
+        set encoding options when configuring the encoder, whether they are
+        codec-specific encoding options or not.
+      - The User Agent <em class="rfc2119">SHOULD</em> make a best-effort
+        attempt to use additional configuration options to improve encoding
+        quality, according to the goals defined by the corresponding
+        [=video content hint=].
+
+    NOTE: Some encoder options are implementation specific, and mappings between
+        {{VideoEncoderConfig/contentHint}} and those options cannot be
+        prescribed.
 
     The User Agent <em class="rfc2119">MUST NOT</em> refuse the configuration
     if it doesn't support this content hint.
     See {{VideoEncoder/isConfigSupported()}}.
-
-    NOTE: Any codec-specific encoding options take precedence over
-      {{contentHint}}.
   </dd>
 
 </dl>
@@ -2531,7 +2549,7 @@ dictionary EncodedAudioChunkInit {
   required EncodedAudioChunkType type;
   [EnforceRange] required long long timestamp;    // microseconds
   [EnforceRange] unsigned long long duration;     // microseconds
-  required BufferSource data;
+  required AllowSharedBufferSource data;
   sequence<ArrayBuffer> transfer = [];
 };
 
@@ -2615,9 +2633,9 @@ enum EncodedAudioChunkType {
         to the {{EncodedAudioChunk}} internal slot in |value| with the same name
         as the named field.
 
-NOTE: <span class=allow-2119>Since {{EncodedAudioChunk}}s are immutable, User
-    Agents may choose to implement serialization using a reference counting
-    model similar to [[#audiodata-transfer-serialization]].</span>
+NOTE: Since {{EncodedAudioChunk}}s are immutable, User
+    Agents can choose to implement serialization using a reference counting
+    model similar to [[#audiodata-transfer-serialization]].
 
 EncodedVideoChunk Interface{#encodedvideochunk-interface}
 -----------------------------------------------------------
@@ -2723,9 +2741,9 @@ enum EncodedVideoChunkType {
         to the {{EncodedVideoChunk}} internal slot in |value| with the same name
         as the named field.
 
-NOTE: <span class=allow-2119>Since {{EncodedVideoChunk}}s are immutable, User
-    Agents may choose to implement serialization using a reference counting
-    model similar to [[#videoframe-transfer-serialization]].</span>
+NOTE: Since {{EncodedVideoChunk}}s are immutable, User
+    Agents can choose to implement serialization using a reference counting
+    model similar to [[#videoframe-transfer-serialization]].
 
 
 Raw Media Interfaces {#raw-media-interfaces}
@@ -3391,6 +3409,8 @@ dictionary VideoFrameBufferInit {
   VideoColorSpaceInit colorSpace;
 
   sequence<ArrayBuffer> transfer = [];
+
+  VideoFrameMetadata metadata;
 };
 
 dictionary VideoFrameMetadata {
@@ -3542,7 +3562,7 @@ dictionary VideoFrameMetadata {
         |init|.{{VideoFrameBufferInit/format}}.
 6. If |parsedRect| is an exception, return |parsedRect|.
 7. Let |optLayout| be `undefined`.
-8. If |options|.{{VideoFrameBufferInit/layout}} [=map/exists=], assign its value
+8. If |init|.{{VideoFrameBufferInit/layout}} [=map/exists=], assign its value
     to |optLayout|.
 9. Let |combinedLayout| be the result of running the [=VideoFrame/Compute
     Layout and Allocation Size=] algorithm with |parsedRect|,
@@ -3625,7 +3645,7 @@ dictionary VideoFrameMetadata {
         algorithm, with |colorSpace| and {{VideoFrame/[[format]]}}, to
         {{VideoFrame/[[color space]]}}.
     11. Assign the result of calling [=Copy VideoFrame metadata=]
-        with |init|'s {{VideoFrameInit/metadata}} to
+        with |init|'s {{VideoFrameBufferInit/metadata}} to
         |frame|.{{VideoFrame/[[metadata]]}}.
 22. Return |frame|.
 
@@ -3698,8 +3718,10 @@ dictionary VideoFrameMetadata {
     {{VideoFrame/[[display height]]}}.
 
 : <dfn attribute for=VideoFrame>timestamp</dfn>
-:: The presentation timestamp, given in microseconds. The timestamp is copied
-    from the {{EncodedVideoChunk}} corresponding to this VideoFrame.
+:: The presentation timestamp, given in microseconds. For decode,
+    timestamp is copied from the {{EncodedVideoChunk}} corresponding
+    to this {{VideoFrame}}. For encode, timestamp is copied to the
+    {{EncodedVideoChunk}}s corresponding to this {{VideoFrame}}. 
 
     The {{VideoFrame/timestamp}} getter steps are to return
     {{VideoFrame/[[timestamp]]}}.
@@ -3753,18 +3775,18 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
 
 : <dfn method for=VideoFrame>copyTo(|destination|, |options|)</dfn>
 :: Asynchronously copies the planes of this frame into |destination| according
-    to |options|. The format of the data is the same as this {{VideoFrame}}'s
-    {{VideoFrame/format}}.
+    to |options|. The format of the data is |options|.{{VideoFrameCopyToOptions/format}},
+    if it [=map/exists=] or [=this=] {{VideoFrame}}'s {{VideoFrame/format}} otherwise.
 
     NOTE: Promises that are returned by several calls to
         {{VideoFrame/copyTo()}} are not guaranteed to resolve in the order they
         were returned.
 
     When invoked, run these steps:
-    1. If {{platform object/[[Detached]]}} is `true`, throw an
-        {{InvalidStateError}} {{DOMException}}.
-    2. If {{VideoFrame/[[format]]}} is `null`, throw a {{NotSupportedError}}
-        {{DOMException}}.
+    1. If {{platform object/[[Detached]]}} is `true`, return a promise rejected
+        with a {{InvalidStateError}} {{DOMException}}.
+    2. If {{VideoFrame/[[format]]}} is `null`, return a promise rejected with a
+        {{NotSupportedError}} {{DOMException}}.
     3. Let |combinedLayout| be the result of running the [=Parse
         VideoFrameCopyToOptions=] algorithm with |options|.
     4. If |combinedLayout| is an exception, return a promise rejected with
@@ -3772,10 +3794,20 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
     5. If `destination.byteLength` is less than |combinedLayout|'s [=combined
         buffer layout/allocationSize=], return a promise rejected with a
         {{TypeError}}.
-    6. Let |p| be a new {{Promise}}.
-    7. Let |copyStepsQueue| be the result of starting a new [=parallel queue=].
-    8. Let |planeLayouts| be a new [=list=].
-    9. Enqueue the following steps to |copyStepsQueue|:
+    6. If |options|.{{VideoFrameCopyToOptions/format}} is equal to one of
+        {{RGBA}}, {{RGBX}}, {{BGRA}}, {{BGRX}} then:
+          1. Let |newOptions| be the result of running the <a>Clone Configuration</a>
+               algorithm with |options|.
+          2. Assign `undefined` to |newOptions|.{{VideoFrameCopyToOptions/format}}.
+          3. Let |rgbFrame| be the result of running the [=VideoFrame/Convert to RGB frame=]
+               algorithm with [=this=], |options|.{{VideoFrameCopyToOptions/format}},
+               and |options|.{{VideoFrameCopyToOptions/colorSpace}}.
+          4. Return the result of calling {{VideoFrame/copyTo()}} on |rgbFrame| with
+               |destination| and |newOptions|.
+    7. Let |p| be a new {{Promise}}.
+    8. Let |copyStepsQueue| be the result of starting a new [=parallel queue=].
+    9. Let |planeLayouts| be a new [=list=].
+    10. Enqueue the following steps to |copyStepsQueue|:
         1. Let resource be the [=media resource=] referenced by
             [[resource reference]].
         2. Let |numPlanes| be the number of planes as defined by
@@ -3812,7 +3844,7 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
             10. Increment |planeIndex| by `1`.
             11. Append |layout| to |planeLayouts|.
         5. [=Queue a task=] to resolve |p| with |planeLayouts|.
-    10. Return |p|.
+    11. Return |p|.
 
 : <dfn method for=VideoFrame>clone()</dfn>
 :: Creates a new {{VideoFrame}} with a reference to the same
@@ -4019,7 +4051,7 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
             |heightScale| and round the result. Assign the rounded result to
             |frame|'s {{VideoFrame/[[display height]]}}.
 
-: <dfn>Clone VideoFrame</dfn> (with |frame|)
+: <dfn export>Clone VideoFrame</dfn> (with |frame|)
 :: 1. Let |clone| be a new {{VideoFrame}} initialized as follows:
         1. Let |resource| be the [=media resource=] referenced by |frame|’s
             [[resource reference]].
@@ -4031,7 +4063,7 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
             in |clone|.
     2. Return |clone|.
 
-: <dfn>Close VideoFrame</dfn> (with |frame|)
+: <dfn export>Close VideoFrame</dfn> (with |frame|)
 :: 1. Assign `null` to |frame|'s {{VideoFrame/[[resource reference]]}}.
     2. Assign `true` to |frame|'s {{platform object/[[Detached]]}}.
     3. Assign `null` to |frame|'s {{VideoFrame/format}}.
@@ -4056,10 +4088,17 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
     6. Let |optLayout| be `undefined`.
     7. If |options|.{{VideoFrameCopyToOptions/layout}} [=map/exists=], assign
         its value to |optLayout|.
-    8. Let |combinedLayout| be the result of running the [=VideoFrame/Compute
-        Layout and Allocation Size=] algorithm with |parsedRect|,
-        {{VideoFrame/[[format]]}}, and |optLayout|.
-    9. Return |combinedLayout|.
+    8. Let |format| be `undefined`.
+    9. If |options|.{{VideoFrameCopyToOptions/format}} does not [=map/exist=],
+        assign {{VideoFrame/[[format]]}} to |format|.
+    10. Otherwise, if |options|.{{VideoFrameCopyToOptions/format}} is equal to
+        one of {{RGBA}}, {{RGBX}}, {{BGRA}}, {{BGRX}}, then assign
+        |options|.{{VideoFrameCopyToOptions/format}} to |format|,
+        otherwise return {{NotSupportedError}}.
+    11. Let |combinedLayout| be the result of running the [=VideoFrame/Compute
+        Layout and Allocation Size=] algorithm with |parsedRect|, |format|,
+        and |optLayout|.
+    12. Return |combinedLayout|.
 
 : <dfn for=VideoFrame>Verify Rect Offset Alignment</dfn> (with |format| and
     |rect|)
@@ -4130,7 +4169,7 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
             multiplied by |sampleBytes|.
         9. Set |computedLayout|'s [=computed plane layout/sourceWidthBytes=] to
             the result of the integer division of
-            truncated |parsedRect|.{{DOMRectInit/width}} by |sampleHeight|,
+            truncated |parsedRect|.{{DOMRectInit/width}} by |sampleWidth|,
             multiplied by |sampleBytes|.
         10. If |layout| is not `undefined`:
             1. Let |planeLayout| be the {{PlaneLayout}} in |layout| at position
@@ -4191,10 +4230,34 @@ A <dfn>computed plane layout</dfn> is a [=struct=] that consists of:
             [=combined buffer layout/allocationSize=].
     9. Return |combinedLayout|.
 
+: <dfn for=VideoFrame>Convert to RGB frame</dfn> (with |frame|, |format| and |colorSpace|)
+ :: 1. This algorithm <em class="rfc2119">MUST</em> be called only if |format|
+        is equal to one of {{RGBA}}, {{RGBX}}, {{BGRA}}, {{BGRX}}.
+    2. Let |convertedFrame| be a new {{VideoFrame}}, constructed as follows:
+        1. Assign `false` to {{platform object/[[Detached]]}}.
+        2. Assign |format| to {{VideoFrame/[[format]]}}.
+        3. Let |width| be |frame|'s {{VideoFrame/[[visible width]]}}.
+        4. Let |height| be |frame|'s {{VideoFrame/[[visible height]]}}.
+        5. Assign |width|, |height|, 0, 0, |width|, |height|, |width|, and
+            |height| to {{VideoFrame/[[coded width]]}},
+            {{VideoFrame/[[coded height]]}}, {{VideoFrame/[[visible left]]}},
+            {{VideoFrame/[[visible top]]}}, {{VideoFrame/[[visible width]]}},
+            and {{VideoFrame/[[visible height]]}} respectively.
+	      6. Assign |frame|'s {{VideoFrame/[[duration]]}} and |frame|'s
+            {{VideoFrame/[[timestamp]]}} to {{VideoFrame/[[duration]]}} and
+            {{VideoFrame/[[timestamp]]}} respectively.
+        7. Assign |colorSpace| to {{VideoFrame/[[color space]]}}.
+        8. Let |resource| be a new [=media resource=] containing the result of
+            conversion of [=media resource=] referenced by |frame|'s
+            {{VideoFrame/[[resource reference]]}} into a color space and pixel
+            format specified by |colorSpace| and |format| respectively.
+        9. Assign the reference to |resource| to {{VideoFrame/[[resource reference]]}}
+    3. Return |convertedFrame|.
+
 : <dfn for=VideoFrame>Copy VideoFrame metadata</dfn> (with |metadata|)
 :: 1. Let |metadataCopySerialized| be [$StructuredSerialize$](|metadata|).
     2. Let |metadataCopy| be [$StructuredDeserialize$](|metadataCopySerialized|, [=the current Realm=]).
-    3. return |metadataCopy|.
+    3. Return |metadataCopy|.
 
 The goal of this algorithm is to ensure that metadata owned by a {{VideoFrame}} is immutable.
 
@@ -4247,13 +4310,15 @@ value to {{ColorSpaceConversion/"none"}} disables color space conversion.
 
 VideoFrame CopyTo() Options {#videoframe-copyto-options}
 ------------------------------------------------------------
-Options to specify a rectangle of pixels to copy and the offset and stride of
-planes in the destination buffer.
+Options to specify a rectangle of pixels to copy, their format, and the offset
+and stride of planes in the destination buffer.
 
 <xmp class='idl'>
 dictionary VideoFrameCopyToOptions {
   DOMRectInit rect;
   sequence<PlaneLayout> layout;
+  VideoPixelFormat format;
+  PredefinedColorSpace colorSpace;
 };
 </xmp>
 
@@ -4281,6 +4346,18 @@ will enforce the following requirements:
     to specify an offset and stride for each plane in the destination
     {{BufferSource}}. If unspecified, the planes will be tightly packed. It is
     invalid to specify planes that overlap.
+: <dfn dict-member for=VideoFrameCopyToOptions>format</dfn>
+:: A {{VideoPixelFormat}} for the pixel data in the destination
+    {{BufferSource}}. Potential values are: {{RGBA}}, {{RGBX}}, {{BGRA}},
+    {{BGRX}}. If it does not [=map/exist=], the destination
+    {{BufferSource}} will be in the same format as {{VideoFrame/format}} .
+: <dfn dict-member for=VideoFrameCopyToOptions>colorSpace</dfn>
+:: A {{PredefinedColorSpace}} that <em class="rfc2119">MUST</em> be used as
+    a target color space for the pixel data in the destination
+    {{BufferSource}}, but only if {{VideoFrameCopyToOptions/format}} is one of
+    {{RGBA}}, {{RGBX}}, {{BGRA}}, {{BGRX}}, otherwise it is ignored.
+    If it does not [=map/exist=], {{srgb}} is used.
+
 
 DOMRects in VideoFrame {#videoframe-domrect}
 --------------------------------------------
@@ -4327,21 +4404,37 @@ number and order of the planes. Each format is described in its own sub-section.
 enum VideoPixelFormat {
   // 4:2:0 Y, U, V
   "I420",
+  "I420P10",
+  "I420P12",
   // 4:2:0 Y, U, V, A
   "I420A",
+  "I420AP10",
+  "I420AP12",
   // 4:2:2 Y, U, V
   "I422",
+  "I422P10",
+  "I422P12",
+  // 4:2:2 Y, U, V, A
+  "I422A",
+  "I422AP10",
+  "I422AP12",
   // 4:4:4 Y, U, V
   "I444",
+  "I444P10",
+  "I444P12",
+  // 4:4:4 Y, U, V, A
+  "I444A",
+  "I444AP10",
+  "I444AP12",
   // 4:2:0 Y, UV
   "NV12",
-  // 32bpp RGBA
+  // 4:4:4 RGBA
   "RGBA",
-  // 32bpp RGBX (opaque)
+  // 4:4:4 RGBX (opaque)
   "RGBX",
-  // 32bpp BGRA
+  // 4:4:4 BGRA
   "BGRA",
-  // 32bpp BGRX (opaque)
+  // 4:4:4 BGRX (opaque)
   "BGRX",
 };
 </xmp>
@@ -4365,6 +4458,8 @@ If a {{VideoPixelFormat}} has an alpha component, the format's
 <dfn>equivalent opaque format</dfn> is the same {{VideoPixelFormat}}, without an
 alpha component. If a {{VideoPixelFormat}} does not have an alpha component, it
 is its own [=equivalent opaque format=].
+
+Integer values are unsigned unless otherwise specified.
 
 <dl>
   <dt><dfn enum-value for=VideoPixelFormat>I420</dfn></dt>
@@ -4393,11 +4488,60 @@ is its own [=equivalent opaque format=].
     and {{VideoFrame/visibleRect}}.{{DOMRectInit/y}})
     <em class="rfc2119">MUST</em> be even.
   </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I420P10</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally and vertically by a
+    [=factor=] of 2 compared to the Y plane.
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y plane, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have a number of rows equal to the result of the
+    division of {{VideoFrame/codedHeight}} by 2, rounded up to the nearest
+    integer. Each row has a number of samples equal to the result of the
+    division of {{VideoFrame/codedWidth}} by 2, rounded up to the nearest
+    integer. Samples are arranged starting at the top left of the image.
+
+    The visible rectangle offset ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}}
+    and {{VideoFrame/visibleRect}}.{{DOMRectInit/y}})
+    <em class="rfc2119">MUST</em> be even.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I420P12</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally and vertically by a
+    [=factor=] of 2 compared to the Y plane.
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y plane, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have a number of rows equal to the result of the
+    division of {{VideoFrame/codedHeight}} by 2, rounded up to the nearest
+    integer. Each row has a number of samples equal to the result of the
+    division of {{VideoFrame/codedWidth}} by 2, rounded up to the nearest
+    integer. Samples are arranged starting at the top left of the image.
+
+    The visible rectangle offset ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}}
+    and {{VideoFrame/visibleRect}}.{{DOMRectInit/y}})
+    <em class="rfc2119">MUST</em> be even.
+  </dd>
   <dt><dfn enum-value for=VideoPixelFormat>I420A</dfn></dt>
   <dd>
-
     This format is composed of four distinct planes, one plane of Luma, two
-    planes of Chroma, denoted Y, U and V, and one plane of alpha values, all
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
     present in this order. It is also often refered to as Planar YUV 4:2:0 with
     an alpha channel.
 
@@ -4407,7 +4551,7 @@ is its own [=equivalent opaque format=].
     Each sample in this format is 8 bits.
 
     There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
-    (and therefore bytes) in the Y and alpha planes, arranged starting at the
+    (and therefore bytes) in the Y and Alpha planes, arranged starting at the
     top left of the image, in {{VideoFrame/codedHeight}} rows of
     {{VideoFrame/codedWidth}} samples.
 
@@ -4423,9 +4567,64 @@ is its own [=equivalent opaque format=].
 
     {{I420A}}'s [=equivalent opaque format=] is {{I420}}.
   </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I420AP10</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally and vertically by a
+    [=factor=] of 2 compared to the Y and Alpha planes.
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y and Alpha planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have a number of rows equal to the result of the
+    division of {{VideoFrame/codedHeight}} by 2, rounded up to the nearest
+    integer. Each row has a number of samples equal to the result of the
+    division of {{VideoFrame/codedWidth}} by 2, rounded up to the nearest
+    integer. Samples are arranged starting at the top left of the image.
+
+    The visible rectangle offset ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}}
+    and {{VideoFrame/visibleRect}}.{{DOMRectInit/y}})
+    <em class="rfc2119">MUST</em> be even.
+
+    {{I420AP10}}'s [=equivalent opaque format=] is {{I420P10}}.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I420AP12</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally and vertically by a
+    [=factor=] of 2 compared to the Y and Alpha planes.
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y and Alpha planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have a number of rows equal to the result of the
+    division of {{VideoFrame/codedHeight}} by 2, rounded up to the nearest
+    integer. Each row has a number of samples equal to the result of the
+    division of {{VideoFrame/codedWidth}} by 2, rounded up to the nearest
+    integer. Samples are arranged starting at the top left of the image.
+
+    The visible rectangle offset ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}}
+    and {{VideoFrame/visibleRect}}.{{DOMRectInit/y}})
+    <em class="rfc2119">MUST</em> be even.
+
+    {{I420AP12}}'s [=equivalent opaque format=] is {{I420P12}}.
+  </dd>
   <dt><dfn enum-value for=VideoPixelFormat>I422</dfn></dt>
   <dd>
-
     This format is composed of three distinct planes, one plane of Luma and two
     planes of Chroma, denoted Y, U and V, and present in this order. It is also
     often refered to as Planar YUV 4:2:2.
@@ -4445,27 +4644,236 @@ is its own [=equivalent opaque format=].
     {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer. Samples
     are arranged starting at the top left of the image.
 
-    The visible rectangle offset ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
     <em class="rfc2119">MUST</em> be even.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I422P10</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally by a [=factor=] of 2
+    compared to the Y plane, and not [=sub-sampled=] vertically.
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y plane, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have {{VideoFrame/codedHeight}} rows. Each row has a
+    number of samples equal to the result of the division of
+    {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer.
+    Samples are arranged starting at the top left of the image.
+
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    <em class="rfc2119">MUST</em> be even.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I422P12</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally by a [=factor=] of 2
+    compared to the Y plane, and not [=sub-sampled=] vertically.
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y plane, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have {{VideoFrame/codedHeight}} rows. Each row has a
+    number of samples equal to the result of the division of
+    {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer.
+    Samples are arranged starting at the top left of the image.
+
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    <em class="rfc2119">MUST</em> be even.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I422A</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order. It is also often refered to as Planar YUV 4:2:2 with
+    an alpha channel.
+
+    The U and V planes are [=sub-sampled=] horizontally by a [=factor=] of 2
+    compared to the Y and Alpha planes, and not [=sub-sampled=] vertically.
+
+    Each sample in this format is 8 bits.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    (and therefore bytes) in the Y and Alpha planes, arranged starting at the
+    top left of the image, in {{VideoFrame/codedHeight}} rows of
+    {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have {{VideoFrame/codedHeight}} rows. Each row has a
+    number of samples equal to the result of the division of
+    {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer. Samples
+    are arranged starting at the top left of the image.
+
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    <em class="rfc2119">MUST</em> be even.
+
+    {{I422A}}'s [=equivalent opaque format=] is {{I422}}.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I422AP10</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally by a [=factor=] of 2
+    compared to the Y and Alpha planes, and not [=sub-sampled=] vertically.
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y and Alpha planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have {{VideoFrame/codedHeight}} rows. Each row has a
+    number of samples equal to the result of the division of
+    {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer.
+    Samples are arranged starting at the top left of the image.
+
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    <em class="rfc2119">MUST</em> be even.
+
+    {{I422AP10}}'s [=equivalent opaque format=] is {{I420P10}}.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I422AP12</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    The U and V planes are [=sub-sampled=] horizontally by a [=factor=] of 2
+    compared to the Y and Alpha planes, and not [=sub-sampled=] vertically.
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in the Y and Alpha planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    The U and V planes have {{VideoFrame/codedHeight}} rows. Each row has a
+    number of samples equal to the result of the division of
+    {{VideoFrame/codedWidth}} by 2, rounded up to the nearest integer.
+    Samples are arranged starting at the top left of the image.
+
+    The visible rectangle horizontal offset
+    ({{VideoFrame/visibleRect}}.{{DOMRectInit/x}})
+    <em class="rfc2119">MUST</em> be even.
+
+    {{I422AP10}}'s [=equivalent opaque format=] is {{I420P10}}.
   </dd>
   <dt><dfn enum-value for=VideoPixelFormat>I444</dfn></dt>
   <dd>
-
     This format is composed of three distinct planes, one plane of Luma and two
     planes of Chroma, denoted Y, U and V, and present in this order. It is also
     often refered to as Planar YUV 4:4:4.
 
-    Each sample in this format is 8 bits. This format does not use
-    [=sub-sampling=].
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 8 bits.
 
     There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
     (and therefore bytes) in all three planes, arranged starting at the top left
     of the image, in {{VideoFrame/codedHeight}} rows of
     {{VideoFrame/codedWidth}} samples.
   </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I444P10</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in all three planes, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I444P12</dfn></dt>
+  <dd>
+    This format is composed of three distinct planes, one plane of Luma and two
+    planes of Chroma, denoted Y, U and V, and present in this order.
+
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in all three planes, arranged starting at the top left of the image, in
+    {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I444A</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 8 bits.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    (and therefore bytes) in all four planes, arranged starting at the top left
+    of the image, in {{VideoFrame/codedHeight}} rows of
+    {{VideoFrame/codedWidth}} samples.
+
+    {{I444A}}'s [=equivalent opaque format=] is {{I444}}.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I444AP10</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 10 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in all four planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    {{I444AP10}}'s [=equivalent opaque format=] is {{I444P10}}.
+  </dd>
+  <dt><dfn enum-value for=VideoPixelFormat>I444AP12</dfn></dt>
+  <dd>
+    This format is composed of four distinct planes, one plane of Luma, two
+    planes of Chroma, denoted Y, U and V, and one plane of Alpha values, all
+    present in this order.
+
+    This format does not use [=sub-sampling=].
+
+    Each sample in this format is 12 bits, encoded as a 16-bit integer in
+    little-endian byte order.
+
+    There are {{VideoFrame/codedWidth}} * {{VideoFrame/codedHeight}} samples
+    in all four planes, arranged starting at the top left of the image,
+    in {{VideoFrame/codedHeight}} rows of {{VideoFrame/codedWidth}} samples.
+
+    {{I444AP10}}'s [=equivalent opaque format=] is {{I444P10}}.
+  </dd>
   <dt><dfn enum-value for=VideoPixelFormat>NV12</dfn></dt>
   <dd>
-
     This format is composed of two distinct planes, one plane of Luma and then
     another plane for the two Chroma components. The two planes are present in
     this order, and are refered to as respectively the Y plane and the UV plane.
@@ -4519,7 +4927,6 @@ is its own [=equivalent opaque format=].
   </dd>
   <dt><dfn enum-value for=VideoPixelFormat>RGBA</dfn></dt>
   <dd>
-
     This format is composed of a single plane, that encodes four components:
     Red, Green, Blue, and an alpha value, present in this order.
 
@@ -4534,7 +4941,6 @@ is its own [=equivalent opaque format=].
   </dd>
   <dt><dfn enum-value for=VideoPixelFormat>RGBX</dfn></dt>
   <dd>
-
     This format is composed of a single plane, that encodes four components:
     Red, Green, Blue, and a padding value, present in this order.
 
@@ -4548,7 +4954,6 @@ is its own [=equivalent opaque format=].
   </dd>
   <dt><dfn enum-value for=VideoPixelFormat>BGRA</dfn></dt>
   <dd>
-
     This format is composed of a single plane, that encodes four components:
     Blue, Green, Red, and an alpha value, present in this order.
 
@@ -4563,7 +4968,6 @@ is its own [=equivalent opaque format=].
   </dd>
   <dt><dfn enum-value for=VideoPixelFormat>BGRX</dfn></dt>
   <dd>
-
     This format is composed of a single plane, that encodes four components:
     Blue, Green, Red, and a padding value, present in this order.
 
@@ -5092,7 +5496,8 @@ interface ImageDecoder {
     2. If {{ImageDecoder/[[encoded data]]}} does not contain enough data to
         determine the number of tracks:
         1. If {{ImageDecoder/complete}} is `true`, [=queue a task=] to run the
-            [=ImageDecoder/Close ImageDecoder=] algorithm.
+            [=ImageDecoder/Close ImageDecoder=] algorithm with a
+            {{InvalidStateError}} {{DOMException}}.
         2. Abort these steps.
     3. If the number of tracks is found to be `0`, [=queue a task=] to run the
         [=ImageDecoder/Close ImageDecoder=] algorithm and abort these steps.
@@ -5356,16 +5761,20 @@ interface ImageDecoder {
     1. Assign `true` to {{ImageDecoder/[[closed]]}}.
     2. Clear {{ImageDecoder/[[codec implementation]]}} and release associated
         [=system resources=].
-    3. Remove all entries from {{ImageDecoder/[[ImageTrackList]]}}.
-    4. Assign `-1` to {{ImageDecoder/[[ImageTrackList]]}}'s
-        {{ImageTrackList/[[selected index]]}}.
-
+    3. If {{ImageDecoder/[[ImageTrackList]]}} is empty, reject
+        {{ImageTrackList/[[ready promise]]}} with |exception|. Otherwise
+        perform these steps,
+        1. Remove all entries from {{ImageDecoder/[[ImageTrackList]]}}.
+        2. Assign `-1` to {{ImageDecoder/[[ImageTrackList]]}}'s
+            {{ImageTrackList/[[selected index]]}}.
+    4. If {{ImageDecoder/[[complete]]}} is false resolve
+        {{ImageDecoder/[[completed promise]]}} with |exception|.
 
 ImageDecoderInit Interface {#imagedecoderinit-interface}
 --------------------------------------------------------
 <pre class='idl'>
 <xmp>
-typedef (BufferSource or ReadableStream) ImageBufferSource;
+typedef (AllowSharedBufferSource or ReadableStream) ImageBufferSource;
 dictionary ImageDecoderInit {
   required DOMString type;
   required ImageBufferSource data;
@@ -5384,8 +5793,7 @@ run these steps:
 2. If |data| is of type {{ReadableStream}} and the ReadableStream is
     [=ReadableStream/disturbed=] or [=ReadableStream/locked=], return `false`.
 3. If |data| is of type {{BufferSource}}:
-    1. If the result of running  IsDetachedBuffer (described in
-        [[!ECMASCRIPT]]) on |data| is `false`, return `false`.
+    1. If |data| is [[=BufferSource/detached=]], return false.
     2. If |data| [=list/is empty=], return `false`.
 4. If {{ImageDecoderInit/desiredWidth}} [=map/exists=] and
     {{ImageDecoderInit/desiredHeight}} does not exist, return `false`.
@@ -5516,7 +5924,8 @@ interface ImageTrackList {
 
 : <dfn attribute for=ImageTrackList>\[[selected index]]</dfn>
 :: The index of the selected track in {{ImageTrackList/[[track list]]}}. A
-    value of `-1` indicates that no track is selected.
+    value of `-1` indicates that no track is selected. The initial value
+    is `-1`.
 
 ### Attributes ### {#imagetracklist-attributes}
 : <dfn attribute for=ImageTrackList>ready</dfn>
