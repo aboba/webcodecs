@@ -1,7 +1,7 @@
 'use strict';
 
 let preferredResolution;
-let mediaStream, bitrate = 100000;
+let mediaStream, bitrate = 300000;
 let stopped = false;
 let preferredCodec ="H264";
 let mode = "L1T1";
@@ -59,20 +59,18 @@ function metrics_update(data) {
 
 function metrics_report() {
   metrics.all.sort((a, b) =>  {
-    return (100000 * (a.mediaTime - b.mediaTime) + a.output - b.output);
+    return (100000 * (b.mediaTime - a.mediaTime) + b.output - a.output);
   });
   const len = metrics.all.length;
-  let j = 0;
   for (let i = 0; i < len ; i++ ) {
     if (metrics.all[i].output == 1) {
       const frameno = metrics.all[i].presentedFrames;
-      const g2g = metrics.all[i].expectedDisplayTime - metrics.all[i-1].captureTime;
-      const mediaTime = metrics.all[i].mediaTime;
-      const captureTime = metrics.all[i-1].captureTime;
+      const captureTime = metrics.all[i].captureTime;
       const expectedDisplayTime = metrics.all[i].expectedDisplayTime;
-      const delay = metrics.all[i].expectedDisplayTime - metrics.all[i-1].expectedDisplayTime;
+      const g2g = Math.max(0,expectedDisplayTime - captureTime);
+      const mediaTime = metrics.all[i].mediaTime;
       const data = [frameno, g2g];
-      const info = {frameno: frameno, g2g: g2g, mediaTime: mediaTime, captureTime: captureTime, expectedDisplayTime: expectedDisplayTime, delay: delay};
+      const info = {frameno: frameno, g2g: g2g, mediaTime: mediaTime, captureTime: captureTime, expectedDisplayTime: expectedDisplayTime};
       e2e.all.push(data);
       display_metrics.all.push(info);
     }
@@ -393,7 +391,8 @@ document.addEventListener('DOMContentLoaded', async function(event) {
           config.pt = 1;
           break;
         case "H265":
-          config.codec = "hvc1.1.6.L123.00"; // Main profile, level 4.1, main Tier
+          // config.codec = "hvc1.1.6.L123.00"; // Main profile, level 4.1, main Tier
+          config.codec = "hev1.1.6.L93.B0"; // Main profile, level 3.1, up to 1280 x 720@33.7
           config.hevc = { format: "annexb" };
           config.pt = 2;
           break;
@@ -406,7 +405,7 @@ document.addEventListener('DOMContentLoaded', async function(event) {
           config.pt = 4;
           break;
         case "AV1":
-          config.codec = "av01.0.08M.10.0.110.09" // AV1 Main Profile, level 4.0, Main tier, 10-bit content, non-monochrome, with 4:2:0 chroma subsampling
+          config.codec = "av01.0.08M.08.0.110.09" // AV1 Main Profile, level 4.0, Main tier, 8-bit content, non-monochrome, with 4:2:0 chroma subsampling
           config.pt = 5;
           break;
       }
